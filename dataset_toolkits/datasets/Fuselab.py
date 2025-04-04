@@ -8,13 +8,13 @@ def add_args(parser: argparse.ArgumentParser):
         help='gcs bucket prefix')
 
 def get_metadata(bucket, prefix, **kwargs):
-    from google.cloud.storage import Client, transfer_manager
+    from google.cloud.storage import Client
     import pytz
     from datetime import datetime
 
     gcs = Client.from_service_account_json('service_account.json')
     model_blobs = gcs.list_blobs(bucket, prefix=prefix, match_glob='**.usdz')
-    cutoff_date = datetime(2025, 3, 1)
+    cutoff_date = datetime(2024, 9, 1)
     tz_ny= pytz.timezone('America/New_York')
     date_tmz = tz_ny.localize(cutoff_date)
     
@@ -85,9 +85,9 @@ def foreach_instance(metadata, output_dir, func, max_workers=None, desc='Process
             tqdm(total=len(metadata), desc=desc) as pbar:
             def worker(metadatum):
                 try:
-                    local_path = metadatum['local_path']
+                    local_path = metadatum['file_identifier']
                     sha256 = metadatum['sha256']
-                    file = os.path.join(output_dir, local_path)
+                    file = os.path.join(output_dir, 'raw', local_path)
                     record = func(file, sha256)
                     if record is not None:
                         records.append(record)
