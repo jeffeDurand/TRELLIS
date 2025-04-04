@@ -6,6 +6,7 @@ import numpy as np
 import json
 import glob
 
+bpy_engine_init = False
 
 """=============== BLENDER ==============="""
 
@@ -34,27 +35,34 @@ EXT = {
 }
 
 def init_render(engine='CYCLES', resolution=512, geo_mode=False):
-    bpy.context.scene.render.engine = engine
-    bpy.context.scene.render.resolution_x = resolution
-    bpy.context.scene.render.resolution_y = resolution
-    bpy.context.scene.render.resolution_percentage = 100
-    bpy.context.scene.render.image_settings.file_format = 'PNG'
-    bpy.context.scene.render.image_settings.color_mode = 'RGBA'
-    bpy.context.scene.render.film_transparent = True
+    render = bpy.context.scene.render
+    render.engine = engine
+    render.resolution_x = resolution
+    render.resolution_y = resolution
+    render.resolution_percentage = 100
+    render.image_settings.file_format = 'PNG'
+    render.image_settings.color_mode = 'RGBA'
+    render.film_transparent = True
     
-    bpy.context.scene.cycles.device = 'GPU'
-    bpy.context.scene.cycles.samples = 128 if not geo_mode else 1
-    bpy.context.scene.cycles.filter_type = 'BOX'
-    bpy.context.scene.cycles.filter_width = 1
-    bpy.context.scene.cycles.diffuse_bounces = 1
-    bpy.context.scene.cycles.glossy_bounces = 1
-    bpy.context.scene.cycles.transparent_max_bounces = 3 if not geo_mode else 0
-    bpy.context.scene.cycles.transmission_bounces = 3 if not geo_mode else 1
-    bpy.context.scene.cycles.use_denoising = True
+    cycles = bpy.context.scene.cycles
+    cycles.device = 'GPU'
+    cycles.samples = 128 if not geo_mode else 1
+    cycles.filter_type = 'BOX'
+    cycles.filter_width = 1
+    cycles.diffuse_bounces = 1
+    cycles.glossy_bounces = 1
+    cycles.transparent_max_bounces = 3 if not geo_mode else 0
+    cycles.transmission_bounces = 3 if not geo_mode else 1
+    cycles.use_denoising = True
         
-    bpy.context.preferences.addons['cycles'].preferences.get_devices()
-    bpy.context.preferences.addons['cycles'].preferences.compute_device_type = 'CUDA'
+    preferences = bpy.context.preferences.addons['cycles'].preferences
+    preferences.get_devices()
     
+    if sys.platform == "darwin":
+        preferences.compute_device_type = 'METAL'
+    else:
+        preferences.compute_device_type = 'CUDA'
+
 def init_nodes(save_depth=False, save_normal=False, save_albedo=False, save_mist=False):
     if not any([save_depth, save_normal, save_albedo, save_mist]):
         return {}, {}
@@ -62,10 +70,11 @@ def init_nodes(save_depth=False, save_normal=False, save_albedo=False, save_mist
     spec_nodes = {}
     
     bpy.context.scene.use_nodes = True
-    bpy.context.scene.view_layers['View Layer'].use_pass_z = save_depth
-    bpy.context.scene.view_layers['View Layer'].use_pass_normal = save_normal
-    bpy.context.scene.view_layers['View Layer'].use_pass_diffuse_color = save_albedo
-    bpy.context.scene.view_layers['View Layer'].use_pass_mist = save_mist
+    viewLayer = bpy.context.scene.view_layers['View Layer']
+    viewLayer.use_pass_z = save_depth
+    viewLayer.use_pass_normal = save_normal
+    viewLayer.use_pass_diffuse_color = save_albedo
+    viewLayer.use_pass_mist = save_mist
     
     nodes = bpy.context.scene.node_tree.nodes
     links = bpy.context.scene.node_tree.links
@@ -226,17 +235,7 @@ def load_object(object_path: str) -> None:
         raise ValueError(f"Unsupported file type: {object_path}")
 
     if file_extension == "usdz":
-        # install usdz io package
-        dirname = os.path.dirname(os.path.realpath(__file__))
-        usdz_package = os.path.join(dirname, "io_scene_usdz.zip")
-        bpy.ops.preferences.addon_install(filepath=usdz_package)
-        # enable it
-        addon_name = "io_scene_usdz"
-        bpy.ops.preferences.addon_enable(module=addon_name)
-        # import the usdz
-        from io_scene_usdz.import_usdz import import_usdz
-
-        import_usdz(context, filepath=object_path, materials=True, animations=True)
+        bpy.ops.wm.usd_import(filepath=object_path, import_cameras=False, import_lights=False)
         return None
 
     # load from existing import functions
@@ -413,17 +412,22 @@ def get_transform_matrix(obj: bpy.types.Object) -> list:
     matrix.append([0, 0, 0, 1])
     return matrix
 
-def main(arg):
+def render_inner(arg):
+    global bpy_engine_init
+    
     os.makedirs(arg.output_folder, exist_ok=True)
     
-    # Initialize context
-    init_render(engine=arg.engine, resolution=arg.resolution, geo_mode=arg.geo_mode)
-    outputs, spec_nodes = init_nodes(
-        save_depth=arg.save_depth,
-        save_normal=arg.save_normal,
-        save_albedo=arg.save_albedo,
-        save_mist=arg.save_mist
-    )
+    if not bpy_engine_init:
+        # Initialize context
+        init_render(engine=arg.engine, resolution=arg.resolution, geo_mode=arg.geo_mode)
+        outputs, spec_nodes = init_nodes(
+            save_depth=arg.save_depth,
+            save_normal=arg.save_normal,
+            save_albedo=arg.save_albedo,
+            save_mist=arg.save_mist
+        )
+        bpy_engine_init = True
+        
     if arg.object.endswith(".blend"):
         delete_invisible_objects()
     else:
@@ -506,8 +510,7 @@ def main(arg):
         # export ply mesh
         bpy.ops.export_mesh.ply(filepath=os.path.join(arg.output_folder, 'mesh.ply'))
 
-        
-if __name__ == '__main__':
+def bpy_render(**kwargs):
     parser = argparse.ArgumentParser(description='Renders given obj file by rotation a camera around it.')
     parser.add_argument('--views', type=str, help='JSON string of views. Contains a list of {yaw, pitch, radius, fov} object.')
     parser.add_argument('--object', type=str, help='Path to the 3D model file to be rendered.')
@@ -521,8 +524,7 @@ if __name__ == '__main__':
     parser.add_argument('--save_mist', action='store_true', help='Save the mist distance maps.')
     parser.add_argument('--split_normal', action='store_true', help='Split the normals of the mesh.')
     parser.add_argument('--save_mesh', action='store_true', help='Save the mesh as a .ply file.')
-    argv = sys.argv[sys.argv.index("--") + 1:]
-    args = parser.parse_args(argv)
+    args = parser.parse_args(kwargs)
 
-    main(args)
+    render_inner(args)
     

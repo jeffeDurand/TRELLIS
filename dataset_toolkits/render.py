@@ -10,8 +10,7 @@ from functools import partial
 from subprocess import DEVNULL, call
 import numpy as np
 from utils import sphere_hammersley_sequence
-
-
+from blender_script.render import bpy_render 
 
 def _render(file_path, sha256, output_dir, num_views):
     output_folder = os.path.join(output_dir, 'renders', sha256)
@@ -28,10 +27,7 @@ def _render(file_path, sha256, output_dir, num_views):
     fov = [40 / 180 * np.pi] * num_views
     views = [{'yaw': y, 'pitch': p, 'radius': r, 'fov': f} for y, p, r, f in zip(yaws, pitchs, radius, fov)]
     
-    '''    
     args = [
-        BLENDER_PATH, '-b', '-P', os.path.join(os.path.dirname(__file__), 'blender_script', 'render.py'),
-        '--',
         '--views', json.dumps(views),
         '--object', os.path.expanduser(file_path),
         '--resolution', '512',
@@ -39,12 +35,11 @@ def _render(file_path, sha256, output_dir, num_views):
         '--engine', 'CYCLES',
         '--save_mesh',
     ]
-    '''
-
+    
     if file_path.endswith('.blend'):
         args.insert(1, file_path)
     
-    call(args, stdout=DEVNULL, stderr=DEVNULL)
+    bpy_render(args)
     
     if os.path.exists(os.path.join(output_folder, 'transforms.json')):
         return {'sha256': sha256, 'rendered': True}

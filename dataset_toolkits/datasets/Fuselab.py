@@ -2,16 +2,19 @@ import argparse
 import pandas as pd
 
 def add_args(parser: argparse.ArgumentParser):
-    return #nothing to do
+    parser.add_argument('--bucket', type=str, default='',
+        help='gcs bucket name')
+    parser.add_argument('--prefix', type=str, default='',
+        help='gcs bucket prefix')
 
-def get_metadata(**kwargs):
+def get_metadata(bucket, prefix, **kwargs):
     from google.cloud.storage import Client, transfer_manager
     import pytz
     from datetime import datetime
 
     gcs = Client.from_service_account_json('service_account.json')
-    model_blobs = gcs.list_blobs("diffuse-stor", prefix="40/run", match_glob='**.usdz')
-    cutoff_date = datetime(2024, 9, 1)
+    model_blobs = gcs.list_blobs(bucket, prefix=prefix, match_glob='**.usdz')
+    cutoff_date = datetime(2025, 3, 1)
     tz_ny= pytz.timezone('America/New_York')
     date_tmz = tz_ny.localize(cutoff_date)
     
@@ -35,9 +38,8 @@ def get_metadata(**kwargs):
         metadata['num_voxels'].append(0)
         metadata['cond_rendered'].append(False)        
     return pd.DataFrame(metadata, columns=['sha256', 'file_identifier', 'aesthetic_score', 'captions', 'rendered', 'voxelized', 'num_voxels', 'cond_rendered'])
-        
 
-def download(metadata, output_dir, **kwargs):
+def download(metadata, output_dir, bucket, **kwargs):
     from google.cloud.storage import Client, transfer_manager
     import os
 
@@ -46,7 +48,7 @@ def download(metadata, output_dir, **kwargs):
 
     gcs = Client.from_service_account_json('service_account.json')
     
-    bucket = gcs.bucket("diffuse-stor")
+    bucket = gcs.bucket(bucket)
     
     blob_names = metadata['file_identifier'].tolist()
     
