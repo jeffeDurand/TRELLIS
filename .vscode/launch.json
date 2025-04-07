@@ -46,7 +46,9 @@
             "args": [
                 "Fuselab",
                 "--output_dir",
-                "datasets/Fuselab"
+                "datasets/Fuselab",
+                "--max_workers",
+                "1",
             ]
         },
         {

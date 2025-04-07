@@ -5,6 +5,7 @@ from mathutils import Vector, Matrix
 import numpy as np
 import json
 import glob
+import addon_utils
 
 
 """=============== BLENDER ==============="""
@@ -484,7 +485,7 @@ def main(arg):
         print('[INFO] Meshes triangulated.')
         
         # export ply mesh
-        bpy.ops.export_mesh.ply(filepath=os.path.join(arg.output_folder, 'mesh.ply'))
+        bpy.ops.wm.ply_export(filepath=os.path.join(arg.output_folder, 'mesh.ply'))
 
         
 if __name__ == '__main__':
