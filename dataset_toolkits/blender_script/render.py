@@ -20,6 +20,7 @@ IMPORT_FUNCTIONS: Dict[str, Callable] = {
     "dae": bpy.ops.wm.collada_import,
     "ply": bpy.ops.import_mesh.ply,
     "abc": bpy.ops.wm.alembic_import,
+    "usdz": bpy.ops.wm.usd_import,
     "blend": bpy.ops.wm.append,
 }
 
@@ -34,27 +35,34 @@ EXT = {
 }
 
 def init_render(engine='CYCLES', resolution=512, geo_mode=False):
-    bpy.context.scene.render.engine = engine
-    bpy.context.scene.render.resolution_x = resolution
-    bpy.context.scene.render.resolution_y = resolution
-    bpy.context.scene.render.resolution_percentage = 100
-    bpy.context.scene.render.image_settings.file_format = 'PNG'
-    bpy.context.scene.render.image_settings.color_mode = 'RGBA'
-    bpy.context.scene.render.film_transparent = True
+    render = bpy.context.scene.render
+    render.engine = engine
+    render.resolution_x = resolution
+    render.resolution_y = resolution
+    render.resolution_percentage = 100
+    render.image_settings.file_format = 'PNG'
+    render.image_settings.color_mode = 'RGBA'
+    render.film_transparent = True
     
-    bpy.context.scene.cycles.device = 'GPU'
-    bpy.context.scene.cycles.samples = 128 if not geo_mode else 1
-    bpy.context.scene.cycles.filter_type = 'BOX'
-    bpy.context.scene.cycles.filter_width = 1
-    bpy.context.scene.cycles.diffuse_bounces = 1
-    bpy.context.scene.cycles.glossy_bounces = 1
-    bpy.context.scene.cycles.transparent_max_bounces = 3 if not geo_mode else 0
-    bpy.context.scene.cycles.transmission_bounces = 3 if not geo_mode else 1
-    bpy.context.scene.cycles.use_denoising = True
+    cycles = bpy.context.scene.cycles
+    cycles.device = 'GPU'
+    cycles.samples = 128 if not geo_mode else 1
+    cycles.filter_type = 'BOX'
+    cycles.filter_width = 1
+    cycles.diffuse_bounces = 1
+    cycles.glossy_bounces = 1
+    cycles.transparent_max_bounces = 3 if not geo_mode else 0
+    cycles.transmission_bounces = 3 if not geo_mode else 1
+    cycles.use_denoising = True
         
-    bpy.context.preferences.addons['cycles'].preferences.get_devices()
-    bpy.context.preferences.addons['cycles'].preferences.compute_device_type = 'CUDA'
+    preferences = bpy.context.preferences.addons['cycles'].preferences
+    preferences.get_devices()
     
+    if sys.platform == "darwin":
+        preferences.compute_device_type = 'METAL'
+    else:
+        preferences.compute_device_type = 'CUDA'
+
 def init_nodes(save_depth=False, save_normal=False, save_albedo=False, save_mist=False):
     if not any([save_depth, save_normal, save_albedo, save_mist]):
         return {}, {}
@@ -62,10 +70,11 @@ def init_nodes(save_depth=False, save_normal=False, save_albedo=False, save_mist
     spec_nodes = {}
     
     bpy.context.scene.use_nodes = True
-    bpy.context.scene.view_layers['View Layer'].use_pass_z = save_depth
-    bpy.context.scene.view_layers['View Layer'].use_pass_normal = save_normal
-    bpy.context.scene.view_layers['View Layer'].use_pass_diffuse_color = save_albedo
-    bpy.context.scene.view_layers['View Layer'].use_pass_mist = save_mist
+    viewLayer = bpy.context.scene.view_layers['View Layer']
+    viewLayer.use_pass_z = save_depth
+    viewLayer.use_pass_normal = save_normal
+    viewLayer.use_pass_diffuse_color = save_albedo
+    viewLayer.use_pass_mist = save_mist
     
     nodes = bpy.context.scene.node_tree.nodes
     links = bpy.context.scene.node_tree.links
@@ -176,37 +185,22 @@ def init_camera():
     return cam
 
 def init_lighting():
-    # Clear existing lights
-    bpy.ops.object.select_all(action="DESELECT")
-    bpy.ops.object.select_by_type(type="LIGHT")
-    bpy.ops.object.delete()
     
-    # Create key light
-    default_light = bpy.data.objects.new("Default_Light", bpy.data.lights.new("Default_Light", type="POINT"))
-    bpy.context.collection.objects.link(default_light)
-    default_light.data.energy = 1000
-    default_light.location = (4, 1, 6)
-    default_light.rotation_euler = (0, 0, 0)
-    
-    # create top light
-    top_light = bpy.data.objects.new("Top_Light", bpy.data.lights.new("Top_Light", type="AREA"))
-    bpy.context.collection.objects.link(top_light)
-    top_light.data.energy = 10000
-    top_light.location = (0, 0, 10)
-    top_light.scale = (100, 100, 100)
-    
-    # create bottom light
-    bottom_light = bpy.data.objects.new("Bottom_Light", bpy.data.lights.new("Bottom_Light", type="AREA"))
-    bpy.context.collection.objects.link(bottom_light)
-    bottom_light.data.energy = 1000
-    bottom_light.location = (0, 0, -10)
-    bottom_light.rotation_euler = (0, 0, 0)
-    
-    return {
-        "default_light": default_light,
-        "top_light": top_light,
-        "bottom_light": bottom_light
-    }
+    world = bpy.data.worlds.new("World")
+    world.use_nodes = True
+
+    world_nodes = world.node_tree.nodes
+    world_nodes.clear()
+
+    background_node = world_nodes.new(type='ShaderNodeBackground')
+    background_node.inputs['Color'].default_value = Vector([0.95, 0.92, 0.78, 1.0]) #f1ebc8
+    background_node.inputs['Strength'].default_value = 1.0
+
+    world_output = world_nodes.new(type='ShaderNodeOutputWorld')
+    world_links = world.node_tree.links
+    world_links.new(background_node.outputs['Background'], world_output.inputs['Surface'])
+
+    bpy.context.scene.world = world
 
 
 def load_object(object_path: str) -> None:
@@ -224,20 +218,6 @@ def load_object(object_path: str) -> None:
     file_extension = object_path.split(".")[-1].lower()
     if file_extension is None:
         raise ValueError(f"Unsupported file type: {object_path}")
-
-    if file_extension == "usdz":
-        # install usdz io package
-        dirname = os.path.dirname(os.path.realpath(__file__))
-        usdz_package = os.path.join(dirname, "io_scene_usdz.zip")
-        bpy.ops.preferences.addon_install(filepath=usdz_package)
-        # enable it
-        addon_name = "io_scene_usdz"
-        bpy.ops.preferences.addon_enable(module=addon_name)
-        # import the usdz
-        from io_scene_usdz.import_usdz import import_usdz
-
-        import_usdz(context, filepath=object_path, materials=True, animations=True)
-        return None
 
     # load from existing import functions
     import_function = IMPORT_FUNCTIONS[file_extension]
