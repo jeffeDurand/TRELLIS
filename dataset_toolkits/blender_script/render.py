@@ -6,7 +6,6 @@ import numpy as np
 import json
 import glob
 
-bpy_engine_init = False
 
 """=============== BLENDER ==============="""
 
@@ -21,6 +20,7 @@ IMPORT_FUNCTIONS: Dict[str, Callable] = {
     "dae": bpy.ops.wm.collada_import,
     "ply": bpy.ops.import_mesh.ply,
     "abc": bpy.ops.wm.alembic_import,
+    "usdz": bpy.ops.wm.usd_import,
     "blend": bpy.ops.wm.append,
 }
 
@@ -185,37 +185,22 @@ def init_camera():
     return cam
 
 def init_lighting():
-    # Clear existing lights
-    bpy.ops.object.select_all(action="DESELECT")
-    bpy.ops.object.select_by_type(type="LIGHT")
-    bpy.ops.object.delete()
     
-    # Create key light
-    default_light = bpy.data.objects.new("Default_Light", bpy.data.lights.new("Default_Light", type="POINT"))
-    bpy.context.collection.objects.link(default_light)
-    default_light.data.energy = 1000
-    default_light.location = (4, 1, 6)
-    default_light.rotation_euler = (0, 0, 0)
-    
-    # create top light
-    top_light = bpy.data.objects.new("Top_Light", bpy.data.lights.new("Top_Light", type="AREA"))
-    bpy.context.collection.objects.link(top_light)
-    top_light.data.energy = 10000
-    top_light.location = (0, 0, 10)
-    top_light.scale = (100, 100, 100)
-    
-    # create bottom light
-    bottom_light = bpy.data.objects.new("Bottom_Light", bpy.data.lights.new("Bottom_Light", type="AREA"))
-    bpy.context.collection.objects.link(bottom_light)
-    bottom_light.data.energy = 1000
-    bottom_light.location = (0, 0, -10)
-    bottom_light.rotation_euler = (0, 0, 0)
-    
-    return {
-        "default_light": default_light,
-        "top_light": top_light,
-        "bottom_light": bottom_light
-    }
+    world = bpy.data.worlds.new("World")
+    world.use_nodes = True
+
+    world_nodes = world.node_tree.nodes
+    world_nodes.clear()
+
+    background_node = world_nodes.new(type='ShaderNodeBackground')
+    background_node.inputs['Color'].default_value = Vector([0.95, 0.92, 0.78, 1.0]) #f1ebc8
+    background_node.inputs['Strength'].default_value = 1.0
+
+    world_output = world_nodes.new(type='ShaderNodeOutputWorld')
+    world_links = world.node_tree.links
+    world_links.new(background_node.outputs['Background'], world_output.inputs['Surface'])
+
+    bpy.context.scene.world = world
 
 
 def load_object(object_path: str) -> None:
@@ -233,10 +218,6 @@ def load_object(object_path: str) -> None:
     file_extension = object_path.split(".")[-1].lower()
     if file_extension is None:
         raise ValueError(f"Unsupported file type: {object_path}")
-
-    if file_extension == "usdz":
-        bpy.ops.wm.usd_import(filepath=object_path, import_cameras=False, import_lights=False)
-        return None
 
     # load from existing import functions
     import_function = IMPORT_FUNCTIONS[file_extension]
@@ -412,22 +393,17 @@ def get_transform_matrix(obj: bpy.types.Object) -> list:
     matrix.append([0, 0, 0, 1])
     return matrix
 
-def render_inner(arg):
-    global bpy_engine_init
-    
+def main(arg):
     os.makedirs(arg.output_folder, exist_ok=True)
     
-    if not bpy_engine_init:
-        # Initialize context
-        init_render(engine=arg.engine, resolution=arg.resolution, geo_mode=arg.geo_mode)
-        outputs, spec_nodes = init_nodes(
-            save_depth=arg.save_depth,
-            save_normal=arg.save_normal,
-            save_albedo=arg.save_albedo,
-            save_mist=arg.save_mist
-        )
-        bpy_engine_init = True
-        
+    # Initialize context
+    init_render(engine=arg.engine, resolution=arg.resolution, geo_mode=arg.geo_mode)
+    outputs, spec_nodes = init_nodes(
+        save_depth=arg.save_depth,
+        save_normal=arg.save_normal,
+        save_albedo=arg.save_albedo,
+        save_mist=arg.save_mist
+    )
     if arg.object.endswith(".blend"):
         delete_invisible_objects()
     else:
@@ -510,7 +486,8 @@ def render_inner(arg):
         # export ply mesh
         bpy.ops.export_mesh.ply(filepath=os.path.join(arg.output_folder, 'mesh.ply'))
 
-def bpy_render(**kwargs):
+        
+if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Renders given obj file by rotation a camera around it.')
     parser.add_argument('--views', type=str, help='JSON string of views. Contains a list of {yaw, pitch, radius, fov} object.')
     parser.add_argument('--object', type=str, help='Path to the 3D model file to be rendered.')
@@ -524,7 +501,8 @@ def bpy_render(**kwargs):
     parser.add_argument('--save_mist', action='store_true', help='Save the mist distance maps.')
     parser.add_argument('--split_normal', action='store_true', help='Split the normals of the mesh.')
     parser.add_argument('--save_mesh', action='store_true', help='Save the mesh as a .ply file.')
-    args = parser.parse_args(kwargs)
+    argv = sys.argv[sys.argv.index("--") + 1:]
+    args = parser.parse_args(argv)
 
-    render_inner(args)
+    main(args)
     
