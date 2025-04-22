@@ -12,6 +12,7 @@
 
 service_account.json
 /datasets
+/outputs
 
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
